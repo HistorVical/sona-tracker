@@ -394,7 +394,6 @@ const Sona = (() => {
       else if (a === "restore") $("sonaRestore").click();
       else if (a === "logout") S.logout();
       else if (a === "wipe") S.wipe();
-      
     });
 
     document.addEventListener("mousedown", e => { if (e.target.classList.contains("overlay")) S.closeModal(e.target.id); });
