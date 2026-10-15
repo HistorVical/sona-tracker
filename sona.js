@@ -384,6 +384,9 @@ const Sona = (() => {
   }
 
   function wire() {
+    // Explicitly prevent any accidental exit prompts or browser-level page leave dialogs
+    window.onbeforeunload = null;
+
     document.addEventListener("click", e => {
       const close = e.target.closest('[data-act="close"]');
       if (close) S.closeModal(close.closest(".overlay").id);
