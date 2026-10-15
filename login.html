@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign in — Sona Tracker</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E📓%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<noscript><style>body.wait{visibility:visible}</style></noscript>
+</head>
+<body class="wait">
+<noscript><p class="note err">Sona Tracker needs JavaScript. Please enable it and reload.</p></noscript>
+
+<main class="login">
+  <section class="login-intro">
+    <h1 class="brand-xl">Sona Tracker</h1>
+    <p class="eyebrow">ONE STOP FOR EVERY STUDENT AT SONA</p>
+    <p class="lead">Assignments, campus errands, events and your pocket money, all in one notebook.</p>
+    <div class="chips">
+      <span class="chip c1">Academics</span><span class="chip c2">Campus Services</span>
+      <span class="chip c3">Community</span><span class="chip c4">Finance</span>
+    </div>
+    <p class="hand">No password, no server. Your notebook lives on this device. ↗</p>
+  </section>
+
+  <section class="sheet" aria-labelledby="signin-title">
+    <span class="tape" aria-hidden="true"></span>
+    <h2 id="signin-title">Hello, Sonarian!</h2>
+    <p class="intro">Open your notebook, or start a new one.</p>
+
+    <label for="name">Your name</label>
+    <input id="name" class="field" maxlength="40" autocomplete="name" placeholder="e.g. Ananya">
+
+    <label for="reg">Register number</label>
+    <input id="reg" class="field" maxlength="25" autocapitalize="characters" spellcheck="false" autocomplete="off" placeholder="Your college register number">
+
+    <div class="two">
+      <div><label for="dept">Department</label>
+        <input id="dept" class="field" list="depts" maxlength="30" placeholder="e.g. CSE">
+        <datalist id="depts"><option value="CSE"><option value="IT"><option value="ECE"><option value="EEE"><option value="Mechanical"><option value="Civil"><option value="AI &amp; DS"><option value="MBA"><option value="MCA"></datalist>
+      </div>
+      <div><label for="year">Year</label>
+        <select id="year" class="field"><option value="">Select</option><option>1st year</option><option>2nd year</option><option>3rd year</option><option>4th year</option><option>PG</option></select>
+      </div>
+    </div>
+
+    <p id="err" class="form-error" role="alert"></p>
+    <button class="btn primary wide big" id="go" data-primary>Open my notebook ↗</button>
+
+    <div class="divider"><span>Already have a backup file?</span></div>
+    <button class="btn wide" id="restoreBtn">Restore from backup</button>
+    <input type="file" id="restoreFile" accept=".json,application/json" hidden>
+
+    <details class="help">
+      <summary>How does sign-in work?</summary>
+      <p>There is no server and no password. Your register number only labels your notebook so Sonarians can share one computer without mixing data. Everything is stored in this browser. Use <b>Save backup</b> often, so you can restore your notebook on another phone or laptop.</p>
+    </details>
+  </section>
+</main>
+
+<script src="sona.js"></script>
+<script>
+(() => {
+  if (!Sona.boot("login")) return;
+  const { $ } = Sona;
+
+  const submit = () => {
+    const r = Sona.signIn({ name: $("name").value, reg: $("reg").value, dept: $("dept").value.trim(), year: $("year").value });
+    if (r.error) { $("err").textContent = r.error; return; }
+    location.replace(Sona.HUB || "hub.html");
+  };
+
+  $("go").addEventListener("click", submit);
+  document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches("#name,#reg,#dept")) submit(); });
+  ["name", "reg", "dept", "year"].forEach(id => $(id).addEventListener("input", () => { $("err").textContent = ""; }));
+
+  $("restoreBtn").addEventListener("click", () => $("restoreFile").click());
+  $("restoreFile").addEventListener("change", e => { if (e.target.files[0]) Sona.restore(e.target.files[0]); e.target.value = ""; });
+  $("name").focus();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Community — Sona Tracker</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E📓%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<noscript><style>body.wait{visibility:visible}</style></noscript>
+</head>
+<body class="wait">
+<noscript><p class="note err">Sona Tracker needs JavaScript. Please enable it and reload.</p></noscript>
+
+<main class="wrap">
+  <div class="phead">
+    <div>
+      <h1 class="sec">Community</h1>
+      <p class="intro">Find your people. Show up for someone.</p>
+    </div>
+  </div>
+
+  <div class="note" id="sampleNote" hidden>Sample listings. The college can replace them with real ones (see the README, “Customising”).</div>
+  <nav class="tabs" id="tabs" aria-label="Sections"></nav>
+  <section class="page" id="page"></section>
+</main>
+
+<div id="bookModal" class="overlay"><div class="box" role="dialog" aria-modal="true" aria-labelledby="bookTitle">
+  <h3 id="bookTitle">Choose a time</h3>
+  <p class="lead" id="bookDesc"></p>
+  <input type="hidden" id="bSvc">
+  <div class="two">
+    <div><label for="bDate">Date</label><input id="bDate" type="date" class="field"></div>
+    <div><label for="bTime">Time</label><select id="bTime" class="field"></select></div>
+  </div>
+  <p class="helper" id="bHint" role="status"></p>
+  <p class="form-error" id="bErr" role="alert"></p>
+  <p class="helper">Times use your device’s clock. This saves a reminder in your notebook only; the provider isn’t contacted, so confirm with them directly.</p>
+  <div class="btns"><button class="btn" data-act="close">Cancel</button><button class="btn ok" data-act="save-booking" data-primary>Save booking</button></div>
+</div></div>
+
+<script src="sona.js"></script>
+<script>
+(() => {
+  if (!Sona.boot("community")) return;
+  const { $, esc, icon, toast, save, today, uid, pretty, dstr, openModal, closeModal, confirmBox } = Sona;
+  const C = () => Sona.data.community;
+
+  /* =====================================================================
+     CUSTOMISE HERE — these lists are what every student sees.
+     Edit, commit and push to GitHub; students get the update on their next visit.
+     Their own registrations and bookings stay in their notebook.
+     ===================================================================== */
+
+  const SHOW_SAMPLE_NOTICE = true;   // set to false once you've replaced the sample data
+
+  const EVENTS = [
+    { id: "design-day", title: "Design Day", category: "Workshop", date: "2026-11-06", time: "14:00", venue: "Innovation Lab", symbol: "✎", colour: "#bcd7e7",
+      description: "Sketch an idea, build a small prototype and share it with the room." },
+    { id: "open-mic", title: "The Open Mic", category: "Culture", date: "2026-11-12", time: "17:00", venue: "Student Courtyard", symbol: "♫", colour: "#d5c4e7",
+      description: "Music, poetry and a little courage. Come to perform or cheer." },
+    { id: "campus-run", title: "Campus Run", category: "Sports", date: "2026-11-21", time: "07:00", venue: "Main Sports Ground", symbol: "↗", colour: "#cce1ba",
+      description: "An easy morning run with friends, followed by a campus breakfast." }
+  ];
+
+  // Fictional sample volunteers. Never publish real names or phone numbers
+  // without each person's clear consent: GitHub Pages sites are public.
+  const DONORS = [
+    { id: "d01", label: "Sample volunteer 01", group: "A+", area: "Main campus" },
+    { id: "d02", label: "Sample volunteer 02", group: "B+", area: "Hostel area" },
+    { id: "d03", label: "Sample volunteer 03", group: "O+", area: "North gate" },
+    { id: "d04", label: "Sample volunteer 04", group: "AB+", area: "Main campus" },
+    { id: "d05", label: "Sample volunteer 05", group: "O-", area: "Hostel area" },
+    { id: "d06", label: "Sample volunteer 06", group: "B-", area: "North gate" }
+  ];
+  const GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
+  const AREAS = ["Main campus", "Hostel area", "North gate"];
+
+  const SERVICES = [
+    { id: "printing", title: "Print & Bind", category: "Printing", symbol: "▤", price: 40, place: "Near the library", description: "A binding appointment; printing costs are extra." },
+    { id: "cycle", title: "Cycle Check", category: "Repairs", symbol: "⚙", price: 100, place: "North gate", description: "A basic cycle inspection; replacement parts are extra." },
+    { id: "laundry", title: "Laundry Drop", category: "Laundry", symbol: "≈", price: 60, place: "Hostel service desk", description: "Wash-and-fold rate per kilogram, confirmed at drop-off." }
+  ];
+  const SLOTS = ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00"];
+
+  /* ===================================================================== */
+
+  const TABS = [["events", "Events", "🎟️"], ["donors", "Blood Donors", "🩸"], ["local", "Local Services", "🛠️"]];
+  const money = n => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
+  const empty = m => `<div class="empty">${esc(m)}</div>`;
+  const started = ev => new Date(`${ev.date}T${ev.time}:00`) <= new Date();
+  let tab = TABS.some(t => t[0] === location.hash.slice(1)) ? location.hash.slice(1) : "events";
+  const f = { q: "", cat: "", group: "", area: "" };
+
+  $("sampleNote").hidden = !SHOW_SAMPLE_NOTICE;
+
+  /* ---------- tabs ---------- */
+
+  function renderTabs() {
+    $("tabs").innerHTML = TABS.map(([k, label, em]) => `<button class="tab ${k === tab ? "on" : ""}" role="tab" aria-selected="${k === tab}" data-act="tab" data-tab="${k}"><span class="te">${em}</span><span>${label}</span></button>`).join("");
+  }
+
+  function fillProfile() {
+    const p = C().donor;
+    $("profileStatus").textContent = p ? `Your profile is saved in this notebook: ${p.group}, ${p.area}.` : "You haven’t saved a profile.";
+    $("withdraw").disabled = !p;
+    $("myGroup").value = p ? p.group : ""; $("myArea").value = p ? p.area : "";
+    $("consent").checked = false;
+  }
+
+  function render() {
+    renderTabs();
+    $("page").innerHTML = views[tab]();
+    update[tab]();
+    if (tab === "donors") fillProfile();
+  }
+
+  const views = {
+    events: () => `<div class="pagehead"><h2 class="sec">🎟️ Event Registration</h2></div>
+      <p class="intro">Find something worth stepping out for. Register to save it in your notebook.</p>
+      <div class="toolbar"><div class="control"><label for="q">Search events</label><input id="q" class="field" type="search" data-f="q" placeholder="Try design or sports" value="${esc(f.q)}"></div>
+      <div class="control"><label for="cat">Category</label><select id="cat" class="field" data-f="cat"><option value="">All categories</option>${[...new Set(EVENTS.map(e => e.category))].map(c => `<option ${c === f.cat ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></div></div>
+      <p class="result" id="count" role="status"></p><div class="grid" id="grid"></div>
+      <div class="bar-head"><h2 class="sec">My registrations</h2></div><div class="records" id="mine"></div>`,
+
+    donors: () => `<div class="pagehead"><h2 class="sec">🩸 Blood Donor Finder</h2></div>
+      <div class="panel"><h3 class="phd">A voluntary directory</h3>
+      <p class="helper">A blood-group filter is not a medical eligibility or compatibility check. A qualified blood bank must assess any real donation. This page is not an emergency service: in an emergency call your local blood bank or hospital.</p></div>
+      <div class="toolbar"><div class="control"><label for="group">Blood group</label><select id="group" class="field" data-f="group"><option value="">All groups</option>${GROUPS.map(g => `<option ${g === f.group ? "selected" : ""}>${g}</option>`).join("")}</select></div>
+      <div class="control"><label for="area">Area</label><select id="area" class="field" data-f="area"><option value="">All areas</option>${AREAS.map(a => `<option ${a === f.area ? "selected" : ""}>${a}</option>`).join("")}</select></div>
+      <button class="btn" id="reset" data-act="reset">Reset filters ↺</button></div>
+      <p class="result" id="count" role="status"></p><div class="grid" id="grid"></div>
+      <div class="bar-head"><h2 class="sec">My volunteer profile</h2></div>
+      <div class="panel"><p class="helper" id="profileStatus"></p>
+      <div class="two"><div class="control"><label for="myGroup">Blood group</label><select id="myGroup" class="field"><option value="">Choose a group</option>${GROUPS.map(g => `<option>${g}</option>`).join("")}</select></div>
+      <div class="control"><label for="myArea">Approximate area</label><select id="myArea" class="field"><option value="">Choose an area</option>${AREAS.map(a => `<option>${a}</option>`).join("")}</select></div></div>
+      <label class="checkline"><input id="consent" type="checkbox"><span>I voluntarily choose to save this profile in my notebook. Nothing is published or sent.</span></label>
+      <p class="helper">Don’t enter real medical records. No phone number or address is collected.</p>
+      <div class="actions"><button class="btn ok" data-act="save-profile">Save profile ✓</button><button class="btn" data-act="copy-profile">Copy my details</button><button class="btn danger" id="withdraw" data-act="withdraw">Withdraw opt-in</button></div></div>`,
+
+    local: () => `<div class="pagehead"><h2 class="sec">🛠️ Local Services</h2></div>
+      <p class="intro">Make a little time for the practical things. Save a booking reminder in your notebook.</p>
+      <div class="toolbar"><div class="control"><label for="q">Search services</label><input id="q" class="field" type="search" data-f="q" placeholder="Try printing, cycle or laundry" value="${esc(f.q)}"></div>
+      <div class="control"><label for="cat">Category</label><select id="cat" class="field" data-f="cat"><option value="">All services</option>${[...new Set(SERVICES.map(s => s.category))].map(c => `<option ${c === f.cat ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></div>
+      <button class="btn" id="reset" data-act="reset">Reset filters ↺</button></div>
+      <p class="result" id="count" role="status"></p><div class="grid" id="grid"></div>
+      <div class="bar-head"><h2 class="sec">My bookings</h2></div><div class="records" id="mine"></div>`
+  };
+
+  /* ---------- per-tab updates ---------- */
+
+  const update = {
+    events() {
+      const q = f.q.trim().toLowerCase();
+      const list = EVENTS.filter(e => (!f.cat || e.category === f.cat) && `${e.title} ${e.category} ${e.venue}`.toLowerCase().includes(q));
+      $("count").textContent = `${list.length} event${list.length === 1 ? "" : "s"}`;
+      $("grid").innerHTML = list.map(e => {
+        const reg = C().registrations.some(r => r.id === e.id), closed = started(e);
+        return `<article class="card"><div class="event-art" style="--art:${esc(Sona.safeColor(e.colour))}"><b aria-hidden="true">${esc(e.symbol)}</b><span>${esc(e.category)}<br>${esc(pretty(e.date))}</span></div>
+          <h3>${esc(e.title)}</h3><p>${esc(e.description)}</p>
+          <ul class="info-list"><li>${esc(pretty(e.date))} · ${esc(e.time)}</li><li>${esc(e.venue)}</li></ul>
+          <button class="btn" data-act="register" data-id="${esc(e.id)}" ${reg || closed ? "disabled" : ""}>${reg ? "Registered ✓" : closed ? "Registration closed" : "Register my place ↗"}</button></article>`;
+      }).join("") || empty("No events match. Try another search.");
+      const mine = [...C().registrations].sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`));
+      $("mine").innerHTML = mine.map(r => `<article class="record"><div><span class="status-chip">${started(r) ? "Past event" : "Registered"}</span><h3>${esc(r.title)}</h3><p>${esc(pretty(r.date))} · ${esc(r.time)} · ${esc(r.venue)}</p></div>
+        <button class="btn danger" data-act="unregister" data-id="${esc(r.id)}">Cancel registration</button></article>`).join("") || empty("No plans yet. Register for an event above.");
+    },
+
+    donors() {
+      const list = DONORS.filter(d => (!f.group || d.group === f.group) && (!f.area || d.area === f.area));
+      $("count").textContent = `${list.length} sample volunteer profile${list.length === 1 ? "" : "s"}`;
+      $("reset").disabled = !f.group && !f.area;
+      $("grid").innerHTML = list.map(d => {
+        const asked = C().requests.includes(d.id);
+        return `<article class="card"><div class="blood-badge" data-family="${esc(d.group.replace(/[+-]$/, ""))}" aria-label="Blood group ${esc(d.group)}">${esc(d.group)}</div>
+          <h3>${esc(d.label)}</h3><ul class="info-list"><li>Area: ${esc(d.area)}</li><li>Sample profile · no real contact details</li></ul>
+          <button class="btn ${asked ? "danger" : ""}" data-act="${asked ? "unrequest" : "request"}" data-id="${esc(d.id)}">${asked ? "Remove request note" : "Note a contact request"}</button>
+          <p class="helper">${asked ? "Saved in your notebook. Nobody has been contacted." : "Saves a reminder in your notebook. Nobody is contacted."}</p></article>`;
+      }).join("") || empty("No volunteers match these filters.");
+    },
+
+    local() {
+      const q = f.q.trim().toLowerCase();
+      const list = SERVICES.filter(s => (!f.cat || s.category === f.cat) && `${s.title} ${s.category} ${s.place} ${s.description}`.toLowerCase().includes(q));
+      $("count").textContent = `${list.length} service${list.length === 1 ? "" : "s"} available`;
+      $("reset").disabled = !f.q && !f.cat;
+      $("grid").innerHTML = list.map(s => `<article class="card"><span class="service-symbol" aria-hidden="true">${esc(s.symbol)}</span>
+        <h3>${esc(s.title)}</h3><span class="status-chip">${esc(s.category)}</span><p>${esc(s.description)}</p><p class="price">${money(s.price)} sample rate</p>
+        <ul class="info-list"><li>${esc(s.place)}</li><li>No online payment</li></ul>
+        <button class="btn" data-act="book" data-id="${esc(s.id)}">Choose a time ↗</button></article>`).join("") || empty("No services match. Try another search or reset the filters.");
+      const mine = [...C().bookings].sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`));
+      $("mine").innerHTML = mine.map(b => `<article class="record"><div><span class="status-chip pending">Booking reminder</span><h3>${esc(b.title || "Service")}</h3><p>${esc(pretty(b.date))} · ${esc(b.time)}</p></div>
+        <button class="btn danger" data-act="cancel-booking" data-id="${esc(b.id)}">Cancel booking</button></article>`).join("") || empty("No bookings yet. Choose a service above.");
+    }
+  };
+
+  /* ---------- booking dialog ---------- */
+
+  function updateSlots() {
+    const now = new Date(), date = $("bDate").value;
+    $("bDate").min = dstr(now);
+    let available = 0;
+    [...$("bTime").options].forEach(o => {
+      if (!o.value) return;
+      o.textContent = o.value; o.disabled = false;
+      if (!date) return;
+      const start = new Date(`${date}T${o.value}:00`);
+      const past = !Number.isFinite(start.getTime()) || start <= now;
+      const clash = C().bookings.some(b => Math.abs(new Date(`${b.date}T${b.time}:00`) - start) < 36e5);
+      o.disabled = past || clash;
+      if (past) o.textContent = `${o.value} (past)`;
+      else if (clash) o.textContent = `${o.value} (you have a booking)`;
+      else available++;
+    });
+    if ($("bTime").selectedOptions[0]?.disabled) $("bTime").value = "";
+    $("bHint").textContent = !date ? "Choose a date to see available times."
+      : available ? `${available} time${available === 1 ? "" : "s"} available. Only your own bookings are checked.`
+      : "No times available on this date. Choose another day.";
+  }
+
+  function openBooking(id) {
+    const s = SERVICES.find(x => x.id === id);
+    if (!s) return;
+    $("bSvc").value = s.id; $("bErr").textContent = ""; $("bDate").value = "";
+    $("bTime").innerHTML = '<option value="">Choose a time</option>' + SLOTS.map(t => `<option value="${t}">${t}</option>`).join("");
+    $("bookTitle").textContent = `Book ${s.title}`;
+    $("bookDesc").textContent = `${s.place} · ${money(s.price)} sample rate`;
+    updateSlots();
+    openModal("bookModal");
+  }
+
+  function saveBooking() {
+    const s = SERVICES.find(x => x.id === $("bSvc").value), date = $("bDate").value, time = $("bTime").value;
+    const start = new Date(`${date}T${time}:00`);
+    const err = m => { $("bErr").textContent = m; };
+    err("");
+    if (!s || !date || !SLOTS.includes(time) || !Number.isFinite(start.getTime()) || dstr(start) !== date || start <= new Date()) return err("Please select a valid future date and time.");
+    if (C().bookings.some(b => Math.abs(new Date(`${b.date}T${b.time}:00`) - start) < 36e5)) return err("You already have a booking within this hour. Choose another time.");
+    C().bookings.push({ id: uid(), serviceId: s.id, title: s.title, date, time });
+    save(); closeModal("bookModal"); update.local(); toast("Booking saved in your notebook");
+  }
+
+  /* ---------- events ---------- */
+
+  document.addEventListener("click", e => {
+    const b = e.target.closest("[data-act]");
+    if (!b || b.disabled) return;
+    const a = b.dataset.act, id = b.dataset.id;
+    if (a === "tab") { tab = b.dataset.tab; Object.assign(f, { q: "", cat: "", group: "", area: "" }); history.replaceState(null, "", "#" + tab); render(); }
+    else if (a === "reset") { Object.assign(f, { q: "", cat: "", group: "", area: "" }); render(); }
+    else if (a === "register") {
+      const ev = EVENTS.find(x => x.id === id);
+      if (!ev || started(ev) || C().registrations.some(r => r.id === id)) return;
+      C().registrations.push({ id, title: ev.title, date: ev.date, time: ev.time, venue: ev.venue });
+      save(); update.events(); toast("You’re registered 🎉");
+    }
+    else if (a === "unregister") confirmBox("Cancel registration?", "This removes the event from your notebook.", () => {
+      C().registrations = C().registrations.filter(r => r.id !== id); save(); update.events(); toast("Registration cancelled");
+    }, "Cancel it");
+    else if (a === "request") { if (DONORS.some(d => d.id === id) && !C().requests.includes(id)) { C().requests.push(id); save(); update.donors(); toast("Noted. Nobody has been contacted."); } }
+    else if (a === "unrequest") { C().requests = C().requests.filter(x => x !== id); save(); update.donors(); toast("Request note removed"); }
+    else if (a === "save-profile") {
+      const group = $("myGroup").value, area = $("myArea").value;
+      if (!GROUPS.includes(group) || !AREAS.includes(area)) return toast("Choose a blood group and an area");
+      if (!$("consent").checked) return toast("Please tick the consent box first");
+      C().donor = { group, area }; save(); fillProfile(); toast("Volunteer profile saved");
+    }
+    else if (a === "copy-profile") {
+      const p = C().donor, me = Sona.data.profile;
+      if (!p) return toast("Save your profile first");
+      Sona.copy(`Blood donor volunteer\nName: ${me.name} (${me.reg}${me.dept ? ", " + me.dept : ""}${me.year ? ", " + me.year : ""})\nBlood group: ${p.group}\nArea: ${p.area}`);
+    }
+    else if (a === "withdraw") { C().donor = null; save(); fillProfile(); toast("Volunteer profile removed"); }
+    else if (a === "book") openBooking(id);
+    else if (a === "save-booking") saveBooking();
+    else if (a === "cancel-booking") confirmBox("Cancel this booking?", "The reminder will be removed from your notebook.", () => {
+      C().bookings = C().bookings.filter(x => x.id !== id); save(); update.local(); toast("Booking cancelled");
+    }, "Cancel it");
+  });
+
+  document.addEventListener("input", e => { if (e.target.dataset.f === "q") { f.q = e.target.value; update[tab](); } });
+  document.addEventListener("change", e => {
+    const k = e.target.dataset.f;
+    if (k && k !== "q") { f[k] = e.target.value; update[tab](); }
+    if (e.target.id === "bDate") updateSlots();
+  });
+  $("bTime").addEventListener("focus", updateSlots);
+
+  Sona.onSync = render;
+  render();
+})();
+</script>
+</body>
+</html>

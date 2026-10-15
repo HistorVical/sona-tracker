@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Home — Sona Tracker</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E📓%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<noscript><style>body.wait{visibility:visible}</style></noscript>
+</head>
+<body class="wait">
+<noscript><p class="note err">Sona Tracker needs JavaScript. Please enable it and reload.</p></noscript>
+
+<main class="wrap">
+  <section class="hero">
+    <div>
+      <p class="eyebrow">THE STUDENT DESK</p>
+      <h1 id="greet">Welcome back!</h1>
+      <p class="lead">Big campus. One little notebook. Pick a page and make today a little easier.</p>
+    </div>
+    <aside class="sticky"><span class="pin" aria-hidden="true"></span>
+      <p>You don’t have to<br>figure it all out<br><b>in one day.</b></p>
+    </aside>
+  </section>
+
+  <div class="note" id="nudge" hidden></div>
+
+  <div class="bar-head"><h2 class="sec">Today at a glance</h2></div>
+  <section class="tiles" id="tiles"></section>
+
+  <div class="bar-head"><h2 class="sec">Where are we heading?</h2></div>
+  <section class="spaces">
+    <a class="card space" href="academics.html">
+      <div class="top"><span class="big-i">📚</span><span class="chip c1">THE STUDY DESK</span></div>
+      <h3>Academics</h3><p>A clearer head. A lighter backpack.</p>
+      <ul><li>Assignment tracker</li><li>Subjects and due dates</li><li>Drag-and-drop lists</li></ul>
+      <div class="foot">Let’s get learning <span class="row">↗</span></div>
+    </a>
+    <a class="card space" href="services.html">
+      <div class="top"><span class="big-i">🏫</span><span class="chip c2">AROUND CAMPUS</span></div>
+      <h3>Campus Services</h3><p>Less running around. More getting sorted.</p>
+      <ul><li>Lost &amp; found</li><li>Complaint tracker</li><li>Canteen order planner</li></ul>
+      <div class="foot">Get things sorted <span class="row">↗</span></div>
+    </a>
+    <a class="card space" href="community.html">
+      <div class="top"><span class="big-i">🤝</span><span class="chip c3">BETTER TOGETHER</span></div>
+      <h3>Community</h3><p>Find your people. Show up for someone.</p>
+      <ul><li>Event registration</li><li>Blood donor finder</li><li>Local service bookings</li></ul>
+      <div class="foot">See what’s happening <span class="row">↗</span></div>
+    </a>
+    <a class="card space" href="finance.html">
+      <div class="top"><span class="big-i">👛</span><span class="chip c4">POCKET CHECK</span></div>
+      <h3>Finance</h3><p>Small spends. A much clearer picture.</p>
+      <ul><li>Personal expense tracker</li><li>Monthly budget</li><li>Spending charts</li></ul>
+      <div class="foot">Check your pocket <span class="row">↗</span></div>
+    </a>
+  </section>
+
+  <div class="bar-head"><h2 class="sec">Your data</h2></div>
+  <section class="panel data-panel">
+    <p class="intro">Everything you add is saved <b>in this browser only</b>. Download a backup file now and then so you can restore it on another device or after clearing your browser.</p>
+    <p class="intro" id="backupInfo"></p>
+    <div class="actions">
+      <button class="btn primary" data-sona="backup">Save backup</button>
+      <button class="btn" data-sona="restore">Load backup</button>
+      <button class="btn danger" data-sona="wipe">Erase data on this device</button>
+    </div>
+  </section>
+</main>
+
+<footer class="foot-bar"><span>Sona Tracker / Made for campus days.</span><a href="#">Back to the top ↑</a></footer>
+
+<script src="sona.js"></script>
+<script>
+(() => {
+  if (!Sona.boot("hub")) return;
+  const { $, esc, today, daysLeft } = Sona;
+  const DAY = 864e5;
+
+  function tile(href, cls, label, value, sub) {
+    return `<a class="tile click ${cls}" href="${href}"><div class="tl">${label}</div><div class="tv">${value}</div><div class="ts">${sub}</div></a>`;
+  }
+
+  function render() {
+    const d = Sona.data, p = d.profile, hr = new Date().getHours();
+    const first = p.name.split(" ")[0] || "there";
+    $("greet").textContent = `${hr < 12 ? "Good morning" : hr < 18 ? "Good afternoon" : "Good evening"}, ${first}!`;
+
+    // Academics
+    const open = d.academics.lists.flatMap(l => l.tasks).filter(t => !t.completed);
+    const dated = open.filter(t => typeof t.dueDate === "string" && t.dueDate);
+    const late = dated.filter(t => daysLeft(t.dueDate) < 0).length;
+    const soon = dated.filter(t => { const n = daysLeft(t.dueDate); return n >= 0 && n <= 3; }).length;
+
+    // Campus services
+    const V = d.services;
+    const lost = V.lost.filter(t => t.status !== "Returned").length;
+    const comp = V.complaints.filter(t => t.status !== "Resolved").length;
+    const ord = V.canteen.filter(t => t.status !== "Collected").length;
+
+    // Community
+    const t0 = today();
+    const ev = d.community.registrations.filter(r => typeof r.date === "string" && r.date >= t0).length;
+    const bk = d.community.bookings.filter(b => typeof b.date === "string" && b.date >= t0).length;
+
+    // Finance
+    const F = d.finance, month = t0.slice(0, 7);
+    const spent = F.lists.flatMap(l => l.tasks)
+      .filter(t => t.type !== "income" && !t.opening && String(t.date || "").startsWith(month))
+      .reduce((s, t) => s + Math.abs(Number(t.amount) || 0), 0);
+    const money = n => (n < 0 ? "-" : "") + F.currency + Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
+    const left = F.budget - spent;
+
+    $("tiles").innerHTML =
+      tile("academics.html", late ? "bad" : "", "Assignments due soon", soon + late, `${late} overdue · ${open.length} open`) +
+      tile("services.html", "", "Open campus items", lost + comp + ord, `${lost} lost &amp; found · ${comp} complaints · ${ord} orders`) +
+      tile("community.html", "", "Coming up", ev + bk, `${ev} event${ev === 1 ? "" : "s"} · ${bk} booking${bk === 1 ? "" : "s"}`) +
+      (F.budget > 0
+        ? tile("finance.html", left < 0 ? "bad" : "good", "Budget left this month", esc(money(left)), `${esc(money(spent))} spent of ${esc(money(F.budget))}`)
+        : tile("finance.html", "", "Spent this month", esc(money(spent)), "Set a monthly budget in Finance"));
+
+    const last = p.lastBackup;
+    $("backupInfo").textContent = last ? `Last backup: ${new Date(last).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}.` : "You haven’t saved a backup yet.";
+    const stale = Date.now() - (last || p.created) > 14 * DAY;
+    $("nudge").hidden = !stale;
+    $("nudge").textContent = last ? "It’s been over two weeks since your last backup. Press “Save backup” to keep your notebook safe." : "Tip: press “Save backup” to download a copy of your notebook. Your data lives only in this browser.";
+  }
+
+  Sona.onSync = render;
+  render();
+})();
+</script>
+</body>
+</html>

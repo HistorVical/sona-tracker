@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Finance — Sona Tracker</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E📓%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<noscript><style>body.wait{visibility:visible}</style></noscript>
+</head>
+<body class="wait">
+<noscript><p class="note err">Sona Tracker needs JavaScript. Please enable it and reload.</p></noscript>
+
+<main class="wrap stack">
+  <div class="phead">
+    <div>
+      <h1 class="sec">Finance Tracker</h1>
+      <p class="intro">Your personal pocket money, wallets and budget. Only you can see this.</p>
+    </div>
+    <div class="actions">
+      <button class="btn primary" data-act="add-task">Add transaction</button>
+      <button class="btn" data-act="labels">Categories</button>
+      <button class="btn" data-act="setup">Settings</button>
+    </div>
+  </div>
+
+  <section class="tiles" id="tiles"></section>
+  <section class="two">
+    <div class="panel" id="catPanel"></div>
+    <div class="panel" id="trendPanel"></div>
+  </section>
+
+  <section>
+    <div class="bar-head">
+      <h2 class="sec">My wallets</h2>
+      <button class="btn" data-act="add-list">Add wallet</button>
+    </div>
+    <div class="board rows" id="board"></div>
+  </section>
+</main>
+
+<div id="setupModal" class="overlay"><div class="box" role="dialog" aria-modal="true" aria-labelledby="setupHead">
+  <h3 id="setupHead">Finance settings</h3>
+  <p class="lead" id="setupLead">Set these up once. You can change them any time.</p>
+  <div class="two">
+    <div><label for="sCur">Currency symbol</label><input id="sCur" class="field" placeholder="₹" maxlength="4"></div>
+    <div><label for="sBudget">Monthly budget</label><input id="sBudget" type="number" min="0" step="any" class="field" placeholder="e.g. 5000"></div>
+  </div>
+  <div id="sBalRow"><label for="sBal">Money you have right now (goes into your first wallet)</label><input id="sBal" type="number" min="0" step="any" class="field" placeholder="e.g. 2000"></div>
+  <div class="btns"><button class="btn" data-act="close">Skip for now</button><button class="btn ok" data-act="save-setup" data-primary>Save</button></div>
+</div></div>
+
+<div id="taskModal" class="overlay"><div class="box" role="dialog" aria-modal="true" aria-labelledby="taskTitle">
+  <h3 id="taskTitle">New transaction</h3>
+  <input type="hidden" id="mTask">
+  <div class="two">
+    <div><label for="tType">Type</label><select id="tType" class="field"><option value="expense">Expense</option><option value="income">Deposit</option></select></div>
+    <div><label for="tAmt">Amount</label><input id="tAmt" type="number" min="0" step="any" class="field" placeholder="0"></div>
+  </div>
+  <label for="tName">What was it for?</label><input id="tName" class="field" maxlength="80" placeholder="e.g. Canteen lunch">
+  <div class="two">
+    <div><label for="mList">Wallet</label><select id="mList" class="field"></select></div>
+    <div><label for="tLabel">Category</label><select id="tLabel" class="field"></select></div>
+  </div>
+  <label for="tDue">Date</label><input id="tDue" type="date" class="field">
+  <label for="tDesc">Notes</label><textarea id="tDesc" rows="2" class="field" placeholder="Optional…"></textarea>
+  <div class="btns"><button class="btn" data-act="close">Cancel</button><button class="btn ok" data-act="save-task" data-primary>Save</button></div>
+</div></div>
+
+<div id="labelsModal" class="overlay"><div class="box" role="dialog" aria-modal="true" aria-labelledby="labelsTitle">
+  <h3 id="labelsTitle">Manage categories</h3>
+  <div id="labelsList" class="scrollbox"></div>
+  <label for="newLabelName">New category</label>
+  <div class="lrow"><input id="newLabelName" class="field" maxlength="30" placeholder="Category name…"><input id="newLabelColor" type="color" value="#a7c4d9" aria-label="Colour"></div>
+  <button class="btn wide" data-act="add-label">Add category</button>
+  <div class="btns"><button class="btn" data-act="close">Done</button></div>
+</div></div>
+
+<script src="sona.js"></script>
+<script>
+(() => {
+  if (!Sona.boot("finance")) return;
+  const { $, esc, icon, toast, save, today, uid, safeColor, openModal, closeModal, confirmBox } = Sona;
+  const F = () => Sona.data.finance;
+  const findList = id => F().lists.find(l => l.id === id);
+  const pad = n => String(n).padStart(2, "0");
+  const amt = t => Math.abs(Number(t.amount) || 0);
+  const signed = t => t.type === "income" ? amt(t) : -amt(t);
+  const money = n => (n < 0 ? "-" : "") + F().currency + Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  const short = n => n >= 1000 ? (n / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 }) + "k" : n.toLocaleString(undefined, { maximumFractionDigits: 1 });
+  let firstSetup = false;
+
+  /* ---------- render ---------- */
+
+  function render(newId) {
+    renderDash();
+    $("board").innerHTML = F().lists.length ? F().lists.map(l => {
+      const bal = l.tasks.reduce((s, t) => s + signed(t), 0), a = `data-list="${esc(l.id)}"`;
+      return `<section class="list ${l.id === newId ? "pop" : ""}" ${a}>
+        <div class="list-head">
+          <input value="${esc(l.title)}" data-list-title="${esc(l.id)}" maxlength="40" aria-label="Wallet name">
+          <span class="count ${bal < 0 ? "neg" : ""}" title="Wallet balance">${esc(money(bal))}</span>
+          <button class="btn sm primary" data-act="add-task" ${a} title="Add transaction" aria-label="Add transaction">${icon("plus")}</button>
+          <button class="btn sm danger" data-act="del-list" ${a} title="Delete wallet" aria-label="Delete wallet">${icon("x")}</button>
+        </div>
+        <div class="cards" data-empty="No money moves here yet. Press + to add one 🪙">${l.tasks.map(t => card(l, t)).join("")}</div>
+      </section>`;
+    }).join("") : '<p class="empty">No wallets yet. Add one to start tracking!</p>';
+  }
+
+  function card(l, t) {
+    const lb = F().labels.find(x => x.id === t.labelId), type = t.type === "income" ? "income" : "expense";
+    const a = `data-list="${esc(l.id)}" data-task="${esc(t.id)}"`;
+    return `<div class="card dnd" ${a}>
+      <div class="chips"><span class="chip t-${type}">${type === "income" ? "Deposit" : "Expense"}</span>${lb ? `<span class="chip" style="background:${safeColor(lb.color)}">${esc(lb.name)}</span>` : ""}<span class="grip" title="Drag handle">${icon("grip")}</span></div>
+      <div class="title">${esc(t.title)}</div>
+      <div class="amt ${type}">${type === "income" ? "+" : "-"}${esc(money(amt(t)))}</div>
+      ${t.description ? `<div class="desc">${esc(t.description)}</div>` : ""}
+      <div class="foot">
+        <span class="due">${t.date ? icon("cal") + esc(t.date) : ""}</span>
+        <span class="row">
+          <button class="btn sm" data-act="edit-task" ${a} title="Edit" aria-label="Edit">${icon("pencil")}</button>
+          <button class="btn sm danger" data-act="del-task" ${a} title="Delete" aria-label="Delete">${icon("bin")}</button>
+        </span>
+      </div>
+    </div>`;
+  }
+
+  function renderDash() {
+    const all = F().lists.flatMap(l => l.tasks), m = today().slice(0, 7), isInc = t => t.type === "income";
+    const month = all.filter(t => String(t.date || "").startsWith(m) && !t.opening);
+    const incN = month.filter(isInc), expN = month.filter(t => !isInc(t));
+    const inc = incN.reduce((s, t) => s + amt(t), 0), exp = expN.reduce((s, t) => s + amt(t), 0);
+    const bal = all.reduce((s, t) => s + signed(t), 0), budget = F().budget;
+    const tile = (cls, lab, val, sub, extra = "", act = "") => `<div class="tile ${cls}" ${act}><div class="tl">${lab}</div><div class="tv">${val}</div><div class="ts">${sub}</div>${extra}</div>`;
+
+    let bt;
+    if (budget > 0) {
+      const left = budget - exp, p = Math.min(100, Math.round(exp / budget * 100));
+      const c = left < 0 ? "#c8453a" : left < budget * .2 ? "#e0a526" : "#6fbf73";
+      bt = tile(left < 0 ? "bad" : "", "Budget left", esc(money(left)), `${p}% of ${esc(money(budget))} used`, `<div class="meter"><i style="width:${p}%;background:${c}"></i></div>`);
+    } else bt = tile("click", "Budget left", "—", "Tap to set a monthly budget", "", 'data-act="setup" role="button" tabindex="0"');
+
+    const n = F().lists.length;
+    $("tiles").innerHTML =
+      tile(bal < 0 ? "bad" : "good", "Total balance", esc(money(bal)), `across ${n} wallet${n === 1 ? "" : "s"}`) +
+      tile("", "Deposited this month", esc(money(inc)), `${incN.length} entr${incN.length === 1 ? "y" : "ies"}`) +
+      tile("", "Spent this month", esc(money(exp)), `${expN.length} entr${expN.length === 1 ? "y" : "ies"}`) + bt;
+
+    // spending by category (this month)
+    const by = {};
+    expN.forEach(t => { const k = t.labelId || ""; by[k] = (by[k] || 0) + amt(t); });
+    const rows = Object.keys(by).sort((a, b) => by[b] - by[a]).slice(0, 6).map(id => {
+      const lb = F().labels.find(l => l.id === id);
+      return { name: lb ? lb.name : "No category", color: lb ? safeColor(lb.color) : "#d6cfc4", v: by[id] };
+    });
+    const top = rows.length ? rows[0].v : 1;
+    $("catPanel").innerHTML = `<h3 class="phd">Spending by category<span>This month</span></h3><div class="pb">` + (rows.length
+      ? rows.map(r => `<div class="crow"><div class="cn" title="${esc(r.name)}">${esc(r.name)}</div><div class="cb"><i style="width:${r.v / top * 100}%;background:${r.color}"></i></div><div class="cv">${esc(money(r.v))}</div></div>`).join("")
+      : '<p class="empty">No spending this month yet. 🎉</p>') + `</div>`;
+
+    // deposits vs spending (last 6 months)
+    const d0 = new Date(), months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(d0.getFullYear(), d0.getMonth() - i, 1);
+      months.push({ k: `${d.getFullYear()}-${pad(d.getMonth() + 1)}`, n: d.toLocaleString(undefined, { month: "short" }).toUpperCase() });
+    }
+    const sum = (k, income) => all.filter(t => String(t.date || "").startsWith(k) && !t.opening && isInc(t) === income).reduce((s, t) => s + amt(t), 0);
+    const data = months.map(x => ({ n: x.n, i: sum(x.k, true), e: sum(x.k, false) }));
+    const mx = Math.max(0, ...data.flatMap(x => [x.i, x.e]));
+    let body = '<p class="empty">Add some transactions to see your trend.</p>';
+    if (mx > 0) {
+      const p10 = Math.pow(10, Math.floor(Math.log10(mx / 4))), step = Math.ceil(mx / 4 / p10) * p10, top4 = step * 4;
+      const bar = (v, col, lab) => `<div class="cbar" title="${lab}: ${esc(money(v))}" style="height:${v / top4 * 100}%;background:${col};${v ? "" : "border:0;"}"></div>`;
+      body = `<div class="plot">` + [0, 1, 2, 3, 4].map(i => `<div class="gl" style="bottom:${i * 25}%"><span>${short(step * i)}</span></div>`).join("") +
+        `<div class="groups">` + data.map(x => `<div class="grp"><div class="bars">${bar(x.i, "#a9cfae", "Deposit")}${bar(x.e, "#f0a99f", "Spending")}</div><div class="gm">${x.n}</div></div>`).join("") + `</div></div>` +
+        `<div class="legend"><span><i style="background:#a9cfae"></i>Deposit</span><span><i style="background:#f0a99f"></i>Spending</span></div>`;
+    }
+    $("trendPanel").innerHTML = `<h3 class="phd">Deposits vs spending<span>Last 6 months</span></h3><div class="pb">${body}</div>`;
+  }
+
+  /* ---------- settings ---------- */
+
+  function openSetup(first) {
+    firstSetup = !!first;
+    $("sCur").value = F().currency; $("sBudget").value = F().budget || ""; $("sBal").value = "";
+    $("sBalRow").hidden = !first;
+    $("setupLead").hidden = !first;
+    $("setupHead").textContent = first ? "Welcome to your money board" : "Finance settings";
+    openModal("setupModal");
+  }
+
+  function saveSetup() {
+    F().currency = $("sCur").value.trim() || "₹";
+    F().budget = Math.max(0, Number($("sBudget").value) || 0);
+    const bal = Math.max(0, Number($("sBal").value) || 0);
+    if (firstSetup && bal > 0 && F().lists[0]) F().lists[0].tasks.push({ id: uid(), title: "Starting balance", amount: bal, type: "income", opening: true, description: "", date: today(), labelId: "" });
+    firstSetup = false;
+    save(); closeModal("setupModal"); render(); toast("Settings saved");
+  }
+
+  /* ---------- transactions ---------- */
+
+  function openTask(listId, taskId) {
+    if (!F().lists.length) return toast("Add a wallet first");
+    const l = findList(listId) || F().lists[0];
+    const t = taskId && l.tasks.find(x => x.id === taskId);
+    $("mList").innerHTML = F().lists.map(x => `<option value="${esc(x.id)}">${esc(x.title)}</option>`).join("");
+    $("tLabel").innerHTML = '<option value="">No category</option>' + F().labels.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join("");
+    $("mTask").value = t ? t.id : ""; $("mList").value = l.id;
+    $("taskTitle").textContent = t ? "Edit transaction" : "New transaction";
+    $("tName").value = t ? t.title : ""; $("tDesc").value = t ? t.description || "" : "";
+    $("tDue").value = t ? t.date || "" : today(); $("tLabel").value = t ? t.labelId || "" : "";
+    $("tType").value = t && t.type === "income" ? "income" : "expense"; $("tAmt").value = t ? amt(t) : "";
+    openModal("taskModal");
+  }
+
+  function saveTask() {
+    const id = $("mTask").value, title = $("tName").value.trim(), amount = Math.abs(Number($("tAmt").value)), target = findList($("mList").value);
+    if (!target) return;
+    if (!title) { toast("Say what it was for first"); $("tName").focus(); return; }
+    if (!amount) { toast("Enter an amount above zero"); $("tAmt").focus(); return; }
+    const data = { title, amount, type: $("tType").value, description: $("tDesc").value.trim(), date: $("tDue").value || today(), labelId: $("tLabel").value };
+    let newId = "";
+    if (id) {
+      const from = F().lists.find(l => l.tasks.some(t => t.id === id)), t = from.tasks.find(x => x.id === id);
+      Object.assign(t, data);
+      if (from !== target) { from.tasks.splice(from.tasks.indexOf(t), 1); target.tasks.push(t); }
+      toast("Transaction updated");
+    } else {
+      newId = uid(); target.tasks.push({ id: newId, ...data });
+      toast(data.type === "income" ? "Money in! 💵" : "Money out! 💸");
+    }
+    save(); closeModal("taskModal"); render();
+    if (newId) fly(newId, data.type);
+  }
+
+  function fly(id, type) {
+    const el = document.querySelector(`.card[data-task="${CSS.escape(id)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (matchMedia("(prefers-reduced-motion:reduce)").matches) return;
+    el.classList.add("pop");
+    requestAnimationFrame(() => {
+      const r = el.getBoundingClientRect(), inc = type === "income";
+      const set = inc ? ["💵", "🪙", "💰", "💵"] : ["💸", "🪙", "💸", "💸"];
+      for (let i = 0; i < 10; i++) {
+        const s = document.createElement("span");
+        s.className = "fly"; s.textContent = set[i % set.length];
+        s.style.left = (r.left + r.width / 2 + (Math.random() - .5) * r.width * .7) + "px";
+        s.style.top = (r.top + r.height / 2) + "px";
+        s.style.fontSize = (1.1 + Math.random() * .9) + "rem";
+        document.body.appendChild(s);
+        const dx = (Math.random() - .5) * 170, rise = 80 + Math.random() * 110, rot = (Math.random() - .5) * 90;
+        const kf = inc ? [
+          { transform: `translate(${dx * .4}px,${-rise}px) rotate(${-rot}deg) scale(.6)`, opacity: 0 },
+          { transform: `translate(${dx * .7}px,${-rise * .3}px) rotate(${rot / 2}deg) scale(1)`, opacity: 1, offset: .35 },
+          { transform: `translate(${dx}px,0) rotate(${rot}deg) scale(1)`, opacity: 1, offset: .75 },
+          { transform: `translate(${dx}px,12px) rotate(${rot}deg) scale(.5)`, opacity: 0 }
+        ] : [
+          { transform: "translate(0,0) scale(.5)", opacity: 0 },
+          { transform: `translate(${dx * .3}px,${-rise * .25}px) rotate(${rot / 3}deg) scale(1)`, opacity: 1, offset: .2 },
+          { transform: `translate(${dx * .7}px,${-rise * .65}px) rotate(${rot / 2}deg) scale(1.1)`, opacity: 1, offset: .6 },
+          { transform: `translate(${dx}px,${-rise}px) rotate(${rot}deg) scale(.6)`, opacity: 0 }
+        ];
+        s.animate(kf, { duration: 1000 + Math.random() * 500, delay: i * 70, easing: "ease-out", fill: "both" }).onfinish = () => s.remove();
+      }
+    });
+  }
+
+  /* ---------- categories ---------- */
+
+  function renderLabels() {
+    $("labelsList").innerHTML = F().labels.length ? F().labels.map(l => `<div class="lrow">
+      <input type="color" value="${safeColor(l.color)}" data-label-color="${esc(l.id)}" aria-label="Colour">
+      <input class="field" value="${esc(l.name)}" maxlength="30" data-label-name="${esc(l.id)}" aria-label="Category name">
+      <button class="btn sm danger" data-act="del-label" data-id="${esc(l.id)}" title="Delete category" aria-label="Delete category">${icon("bin")}</button></div>`).join("")
+      : '<p class="empty">No categories yet. Add one below.</p>';
+  }
+
+  /* ---------- events ---------- */
+
+  document.addEventListener("click", e => {
+    const el = e.target.closest("[data-act]");
+    if (!el) return;
+    const { act, list: lid, task: tid } = el.dataset;
+    const l = lid && findList(lid), t = l && l.tasks.find(x => x.id === tid);
+    switch (act) {
+      case "setup": openSetup(false); break;
+      case "save-setup": saveSetup(); break;
+      case "add-list": {
+        const id = uid();
+        F().lists.push({ id, title: "New wallet", tasks: [] });
+        save(); render(id); toast("Wallet added");
+        setTimeout(() => document.querySelector(`.list[data-list="${CSS.escape(id)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+        break;
+      }
+      case "del-list":
+        if (l) confirmBox(`Delete “${l.title}”?`, "The wallet and every transaction in it will be removed.", () => {
+          F().lists = F().lists.filter(x => x.id !== lid); save(); render(); toast("Wallet deleted");
+        });
+        break;
+      case "add-task": openTask(lid); break;
+      case "edit-task": if (t) openTask(lid, tid); break;
+      case "save-task": saveTask(); break;
+      case "del-task":
+        if (t) confirmBox("Delete this transaction?", `“${t.title}” will be crumpled up for good.`, () =>
+          Sona.crumple(`.card[data-task="${CSS.escape(tid)}"]`, () => {
+            l.tasks = l.tasks.filter(x => x.id !== tid); save(); render(); toast("Transaction deleted");
+          }));
+        break;
+      case "labels": renderLabels(); openModal("labelsModal"); break;
+      case "add-label": {
+        const name = $("newLabelName").value.trim();
+        if (!name) { toast("Give the category a name first"); break; }
+        F().labels.push({ id: uid(), name, color: $("newLabelColor").value });
+        $("newLabelName").value = ""; save(); renderLabels(); render(); toast("Category added");
+        break;
+      }
+      case "del-label":
+        F().labels = F().labels.filter(x => x.id !== el.dataset.id);
+        F().lists.forEach(x => x.tasks.forEach(k => { if (k.labelId === el.dataset.id) k.labelId = ""; }));
+        save(); renderLabels(); render();
+        break;
+    }
+  });
+
+  document.addEventListener("keydown", e => {
+    if ((e.key === "Enter" || e.key === " ") && e.target.matches('.tile[data-act="setup"]')) { e.preventDefault(); openSetup(false); }
+  });
+
+  document.addEventListener("change", e => {
+    const t = e.target;
+    if (t.dataset.listTitle) { const l = findList(t.dataset.listTitle); if (l) { l.title = t.value.trim() || "Untitled wallet"; t.value = l.title; save(); } }
+    if (t.dataset.labelName) { const l = F().labels.find(x => x.id === t.dataset.labelName); if (l) { l.name = t.value.trim() || "Category"; t.value = l.name; save(); render(); } }
+    if (t.dataset.labelColor) { const l = F().labels.find(x => x.id === t.dataset.labelColor); if (l) { l.color = t.value; save(); render(); } }
+  });
+
+  Sona.drag({
+    lists: ".list", box: ".cards", axis: "x",
+    onDrop: info => { Sona.moveTask(F().lists, info); save(); render(); toast("Moved 🎯"); }
+  });
+
+  Sona.onSync = render;
+  render();
+  if (!F().setup) { F().setup = true; save(); openSetup(true); }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Academics — Sona Tracker</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E📓%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<noscript><style>body.wait{visibility:visible}</style></noscript>
+</head>
+<body class="wait">
+<noscript><p class="note err">Sona Tracker needs JavaScript. Please enable it and reload.</p></noscript>
+
+<main class="wrap">
+  <div class="phead">
+    <div>
+      <h1 class="sec">Assignment Tracker</h1>
+      <p class="intro" id="termNote"></p>
+    </div>
+    <div class="actions">
+      <button class="btn primary" data-act="add-task">Add assignment</button>
+      <button class="btn" data-act="add-list">Add list</button>
+      <button class="btn" data-act="labels">Subjects</button>
+      <button class="btn" data-act="details">Semester</button>
+    </div>
+  </div>
+  <div class="stats" id="stats"></div>
+  <div class="scroller" id="scroller"><div class="board cols" id="board"></div></div>
+</main>
+
+<div id="taskModal" class="overlay"><div class="box" role="dialog" aria-modal="true" aria-labelledby="taskTitle">
+  <h3 id="taskTitle">New assignment</h3>
+  <input type="hidden" id="mTask">
+  <label for="tName">Assignment title</label><input id="tName" class="field" maxlength="100" placeholder="e.g. Lab report 3">
+  <label for="tDesc">Notes</label><textarea id="tDesc" rows="3" class="field" placeholder="Requirements, links, marks…"></textarea>
+  <div class="two">
+    <div><label for="tDue">Due date</label><input id="tDue" type="date" class="field"></div>
+    <div><label for="tPri">Priority</label><select id="tPri" class="field"><option>Low</option><option selected>Medium</option><option>High</option></select></div>
+  </div>
+  <div class="two">
+    <div><label for="tLabel">Subject</label><select id="tLabel" class="field"></select></div>
+    <div><label for="tList">List</label><select id="tList" class="field"></select></div>
+  </div>
+  <div class="btns"><button class="btn" data-act="close">Cancel</button><button class="btn ok" data-act="save-task" data-primary>Save</button></div>
+</div></div>
+
+<div id="labelsModal" class="overlay"><div class="box" role="dialog" aria-modal="true" aria-labelledby="labelsTitle">
+  <h3 id="labelsTitle">Manage subjects</h3>
+  <div id="labelsList" class="scrollbox"></div>
+  <label for="newLabelName">New subject</label>
+  <div class="lrow"><input id="newLabelName" class="field" maxlength="30" placeholder="Subject name…"><input id="newLabelColor" type="color" value="#a7c4d9" aria-label="Colour"></div>
+  <button class="btn wide" data-act="add-label">Add subject</button>
+  <div class="btns"><button class="btn" data-act="close">Done</button></div>
+</div></div>
+
+<div id="detailsModal" class="overlay"><div class="box" role="dialog" aria-modal="true" aria-labelledby="detailsTitle">
+  <h3 id="detailsTitle">Semester details</h3>
+  <label for="dTerm">Semester / term</label><input id="dTerm" class="field" maxlength="30" placeholder="e.g. Semester 5, 2026–27">
+  <div class="btns"><button class="btn" data-act="close">Cancel</button><button class="btn ok" data-act="save-details" data-primary>Save</button></div>
+</div></div>
+
+<script src="sona.js"></script>
+<script>
+(() => {
+  if (!Sona.boot("academics")) return;
+  const { $, esc, icon, toast, save, uid, daysLeft, safeColor, openModal, closeModal, confirmBox } = Sona;
+  const A = () => Sona.data.academics;
+  const findList = id => A().lists.find(l => l.id === id);
+  const PRIORITIES = ["Low", "Medium", "High"];
+  let lastTick = null;
+
+  /* ---------- render ---------- */
+
+  function render(newId) {
+    $("termNote").textContent = A().term ? `${A().term} · Drag cards between lists, or press Edit to move them.` : "Drag cards between lists, or press Edit to move them.";
+    stats();
+    $("board").innerHTML = A().lists.length ? A().lists.map(l => `<section class="list ${l.id === newId ? "pop" : ""}" data-list="${esc(l.id)}">
+      <div class="list-head">
+        <input value="${esc(l.title)}" data-list-title="${esc(l.id)}" maxlength="40" aria-label="List name">
+        <span class="count">${l.tasks.length}</span>
+        <button class="btn sm danger" data-act="del-list" data-list="${esc(l.id)}" title="Delete list" aria-label="Delete list">${icon("x")}</button>
+      </div>
+      <div class="cards" data-empty="Nothing here yet.">${l.tasks.map(t => card(l, t)).join("")}</div>
+      <button class="btn" data-act="add-task" data-list="${esc(l.id)}">${icon("plus")}Add assignment</button>
+    </section>`).join("") : `<p class="empty">No lists yet. Press “Add list” to start.</p>`;
+  }
+
+  function stats() {
+    const all = A().lists.flatMap(l => l.tasks);
+    const open = all.filter(t => !t.completed && typeof t.dueDate === "string" && t.dueDate);
+    const late = open.filter(t => daysLeft(t.dueDate) < 0).length;
+    const soon = open.filter(t => { const d = daysLeft(t.dueDate); return d >= 0 && d <= 3; }).length;
+    $("stats").innerHTML =
+      `<span class="stat"><b>${all.length}</b>total</span>` +
+      `<span class="stat"><b>${all.filter(t => t.completed).length}</b>completed</span>` +
+      `<span class="stat ${soon ? "warn" : ""}"><b>${soon}</b>due within 3 days</span>` +
+      `<span class="stat ${late ? "bad" : ""}"><b>${late}</b>overdue</span>`;
+  }
+
+  function dueInfo(t) {
+    if (typeof t.dueDate !== "string" || !t.dueDate) return null;
+    if (t.completed) return { txt: t.dueDate, cls: "" };
+    const d = daysLeft(t.dueDate);
+    if (!Number.isFinite(d)) return { txt: t.dueDate, cls: "" };
+    if (d < 0) return { txt: `${-d} day${d === -1 ? "" : "s"} overdue`, cls: "late" };
+    if (d === 0) return { txt: "Due today", cls: "soon" };
+    if (d === 1) return { txt: "Due tomorrow", cls: "soon" };
+    if (d <= 3) return { txt: `Due in ${d} days`, cls: "soon" };
+    return { txt: `Due ${t.dueDate}`, cls: "" };
+  }
+
+  function card(l, t) {
+    const lb = A().labels.find(x => x.id === t.labelId), di = dueInfo(t);
+    const a = `data-list="${esc(l.id)}" data-task="${esc(t.id)}"`;
+    const pri = PRIORITIES.includes(t.priority) ? t.priority : "";
+    return `<div class="card dnd ${t.completed ? "done" : ""}" ${a}>
+      <div class="chips">${lb ? `<span class="chip" style="background:${safeColor(lb.color)}">${esc(lb.name)}</span>` : ""}${pri && !t.completed ? `<span class="chip p-${pri}">${pri}</span>` : ""}<span class="grip" title="Drag handle">${icon("grip")}</span></div>
+      <div class="title">${esc(t.title)}</div>
+      ${t.description ? `<div class="desc">${esc(t.description)}</div>` : ""}
+      <div class="foot">
+        <span class="due ${di ? di.cls : ""}">${di ? icon("cal") + esc(di.txt) : ""}</span>
+        <span class="row">
+          <button class="btn sm tick ${t.completed ? "on" : ""} ${lastTick === t.id ? "celebrate" : ""}" data-act="toggle" ${a} title="${t.completed ? "Mark not done" : "Mark done"}" aria-pressed="${!!t.completed}">${icon("check")}</button>
+          <button class="btn sm" data-act="edit-task" ${a} title="Edit" aria-label="Edit">${icon("pencil")}</button>
+          <button class="btn sm danger" data-act="del-task" ${a} title="Delete" aria-label="Delete">${icon("bin")}</button>
+        </span>
+      </div>
+    </div>`;
+  }
+
+  /* ---------- assignments ---------- */
+
+  function openTask(listId, taskId) {
+    if (!A().lists.length) return toast("Add a list first");
+    const l = findList(listId) || A().lists[0];
+    const t = taskId && l.tasks.find(x => x.id === taskId);
+    $("tList").innerHTML = A().lists.map(x => `<option value="${esc(x.id)}">${esc(x.title)}</option>`).join("");
+    $("tLabel").innerHTML = '<option value="">No subject</option>' + A().labels.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join("");
+    $("mTask").value = t ? t.id : "";
+    $("taskTitle").textContent = t ? "Edit assignment" : "New assignment";
+    $("tName").value = t ? t.title : ""; $("tDesc").value = t ? t.description || "" : "";
+    $("tDue").value = t ? t.dueDate || "" : ""; $("tPri").value = t && PRIORITIES.includes(t.priority) ? t.priority : "Medium";
+    $("tLabel").value = t ? t.labelId || "" : ""; $("tList").value = l.id;
+    openModal("taskModal");
+  }
+
+  function saveTask() {
+    const id = $("mTask").value, title = $("tName").value.trim(), target = findList($("tList").value);
+    if (!target) return;
+    if (!title) { toast("Give the assignment a title first"); $("tName").focus(); return; }
+    const data = { title, description: $("tDesc").value.trim(), dueDate: $("tDue").value, labelId: $("tLabel").value, priority: $("tPri").value };
+    if (id) {
+      const from = A().lists.find(l => l.tasks.some(t => t.id === id)), t = from.tasks.find(x => x.id === id);
+      Object.assign(t, data);
+      if (from !== target) { from.tasks.splice(from.tasks.indexOf(t), 1); target.tasks.push(t); }
+      toast("Assignment updated");
+    } else { target.tasks.push({ id: uid(), completed: false, ...data }); toast("Assignment added"); }
+    save(); closeModal("taskModal"); render();
+  }
+
+  /* ---------- subjects ---------- */
+
+  function renderLabels() {
+    $("labelsList").innerHTML = A().labels.length ? A().labels.map(l => `<div class="lrow">
+      <input type="color" value="${safeColor(l.color)}" data-label-color="${esc(l.id)}" aria-label="Colour">
+      <input class="field" value="${esc(l.name)}" maxlength="30" data-label-name="${esc(l.id)}" aria-label="Subject name">
+      <button class="btn sm danger" data-act="del-label" data-id="${esc(l.id)}" title="Delete subject" aria-label="Delete subject">${icon("bin")}</button></div>`).join("")
+      : '<p class="empty">No subjects yet. Add one below.</p>';
+  }
+
+  /* ---------- events ---------- */
+
+  document.addEventListener("click", e => {
+    const el = e.target.closest("[data-act]");
+    if (!el) return;
+    const { act, list: lid, task: tid } = el.dataset;
+    const l = lid && findList(lid), t = l && l.tasks.find(x => x.id === tid);
+    switch (act) {
+      case "add-list": {
+        const id = uid();
+        A().lists.push({ id, title: "New list", tasks: [] });
+        save(); render(id); toast("List added");
+        $("scroller").scrollTo({ left: 99999, behavior: "smooth" });
+        break;
+      }
+      case "del-list":
+        if (l) confirmBox(`Delete “${l.title}”?`, "The list and every assignment in it will be removed.", () => {
+          A().lists = A().lists.filter(x => x.id !== lid); save(); render(); toast("List deleted");
+        });
+        break;
+      case "add-task": openTask(lid); break;
+      case "edit-task": if (t) openTask(lid, tid); break;
+      case "save-task": saveTask(); break;
+      case "toggle":
+        if (t) {
+          t.completed = !t.completed; save();
+          lastTick = t.completed ? tid : null; render(); lastTick = null;
+          toast(t.completed ? "Nice, assignment done ✅" : "Marked not done");
+        }
+        break;
+      case "del-task":
+        if (t) confirmBox("Delete this assignment?", `“${t.title}” will be crumpled up for good.`, () =>
+          Sona.crumple(`.card[data-task="${CSS.escape(tid)}"]`, () => {
+            l.tasks = l.tasks.filter(x => x.id !== tid); save(); render(); toast("Assignment deleted");
+          }));
+        break;
+      case "labels": renderLabels(); openModal("labelsModal"); break;
+      case "add-label": {
+        const name = $("newLabelName").value.trim();
+        if (!name) { toast("Give the subject a name first"); break; }
+        A().labels.push({ id: uid(), name, color: $("newLabelColor").value });
+        $("newLabelName").value = ""; save(); renderLabels(); render(); toast("Subject added");
+        break;
+      }
+      case "del-label":
+        A().labels = A().labels.filter(x => x.id !== el.dataset.id);
+        A().lists.forEach(x => x.tasks.forEach(k => { if (k.labelId === el.dataset.id) k.labelId = ""; }));
+        save(); renderLabels(); render();
+        break;
+      case "details": $("dTerm").value = A().term; openModal("detailsModal"); break;
+      case "save-details": A().term = $("dTerm").value.trim(); save(); closeModal("detailsModal"); render(); toast("Saved"); break;
+    }
+  });
+
+  document.addEventListener("change", e => {
+    const t = e.target;
+    if (t.dataset.listTitle) { const l = findList(t.dataset.listTitle); if (l) { l.title = t.value.trim() || "Untitled list"; t.value = l.title; save(); } }
+    if (t.dataset.labelName) { const l = A().labels.find(x => x.id === t.dataset.labelName); if (l) { l.name = t.value.trim() || "Subject"; t.value = l.name; save(); render(); } }
+    if (t.dataset.labelColor) { const l = A().labels.find(x => x.id === t.dataset.labelColor); if (l) { l.color = t.value; save(); render(); } }
+  });
+
+  Sona.drag({
+    lists: ".list", box: ".cards", axis: "y", scroller: $("scroller"),
+    onDrop: info => { Sona.moveTask(A().lists, info); save(); render(); toast("Moved 🎯"); }
+  });
+
+  Sona.onSync = render;
+  render();
+})();
+</script>
+</body>
+</html>

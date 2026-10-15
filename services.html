@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Campus Services — Sona Tracker</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E📓%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<noscript><style>body.wait{visibility:visible}</style></noscript>
+</head>
+<body class="wait">
+<noscript><p class="note err">Sona Tracker needs JavaScript. Please enable it and reload.</p></noscript>
+
+<main class="wrap">
+  <div class="phead">
+    <div>
+      <h1 class="sec">Campus Services</h1>
+      <p class="intro">Lost &amp; found, complaints and canteen plans in one place.</p>
+    </div>
+    <button class="btn" id="menuBtn" data-act="menu">Canteen menu</button>
+  </div>
+
+  <div class="note">Everything here is saved on your device only. Use <b>Copy</b> on a card to send it to the right office, your class group or the canteen counter.</div>
+  <nav class="tabs" id="tabs" aria-label="Sections"></nav>
+  <section class="page" id="page"></section>
+</main>
+
+<div id="taskModal" class="overlay"><div class="box" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
+  <h3 id="taskModalTitle">New card</h3><input type="hidden" id="mTask">
+  <div id="taskFields"></div>
+  <div class="btns"><button class="btn" data-act="close">Cancel</button><button class="btn ok" data-act="save-task" data-primary>Save</button></div>
+</div></div>
+
+<div id="menuModal" class="overlay"><div class="box" role="dialog" aria-modal="true" aria-labelledby="menuTitle">
+  <h3 id="menuTitle">Canteen menu</h3>
+  <p class="lead">A sample menu. Edit the dishes and prices to match your canteen. Tick a dish to make it available.</p>
+  <div id="menuList" class="scrollbox tall"></div>
+  <button class="btn wide" data-act="add-dish">Add dish</button>
+  <div class="btns"><button class="btn" data-act="close">Cancel</button><button class="btn ok" data-act="save-menu" data-primary>Save menu</button></div>
+</div></div>
+
+<script src="sona.js"></script>
+<script>
+(() => {
+  if (!Sona.boot("services")) return;
+  const { $, esc, icon, toast, save, today, uid, pretty, openModal, closeModal, confirmBox } = Sona;
+  const V = () => Sona.data.services;
+
+  const CATS = ["Electronics", "Bags", "ID & Documents", "Keys", "Books", "Clothing", "Other"];
+  const CCATS = ["Wi-Fi", "Water", "Electricity", "Cleanliness", "Classroom", "Lab equipment", "Hostel", "Transport", "Other"];
+  const SLOTS = ["12:00", "12:30", "1:00", "1:30", "2:00", "2:30"];
+  const EM = { Electronics: "🎧", Bags: "🎒", "ID & Documents": "🪪", Keys: "🔑", Books: "📘", Clothing: "🧥", Other: "📦", "Wi-Fi": "📶", Water: "💧", Electricity: "💡", Cleanliness: "🧹", Classroom: "🏫", "Lab equipment": "🔬", Hostel: "🛏️", Transport: "🚌" };
+
+  const TABS = {
+    lost: {
+      icon: "🔍", label: "Lost & Found", head: "Lost & Found", st: ["Open", "Returned"], done: "Returned", reopen: 0, cats: CATS,
+      intro: "Keep track of things you lost or found. Copy a report to post on your class group or hand to the lost &amp; found desk, then mark it returned when it’s sorted.",
+      fields: [["title", "Item name", "text", "e.g. Blue water bottle"], ["cat", "Category", "select", CATS], ["loc", "Where?", "text", "e.g. Library, 2nd floor"], ["date", "Date", "date"], ["desc", "Description", "area", "Colour, brand, marks…"]]
+    },
+    complaints: {
+      icon: "🛠️", label: "Complaints", head: "Complaint Tracker", st: ["Submitted", "Under review", "In progress", "Resolved"], done: "Resolved", reopen: 1, cats: CCATS, add: "Raise complaint",
+      intro: "Note down what’s wrong, copy it to send to the office, and move it along with “Next step” as you follow up.",
+      fields: [["title", "What is wrong?", "text", "e.g. Wi-Fi down in Lab 3"], ["cat", "Category", "select", CCATS], ["pri", "Priority", "select", ["Low", "Medium", "High"]], ["loc", "Where?", "text", "Building, floor, room"], ["date", "Date", "date"], ["desc", "Details", "area", "What happened? Since when?"]]
+    },
+    canteen: {
+      icon: "🍽️", label: "Canteen", head: "Canteen Order Planner", st: ["Planned", "Ordered", "Collected"], done: "Collected", reopen: 0, add: "Plan an order",
+      intro: "Plan what you’ll eat, pick a pickup slot and copy the order to show at the counter. Nothing is sent to the canteen automatically."
+    }
+  };
+
+  let tab = "lost", ui = { q: "", f: "all", cat: "" }, menuDraft = [];
+  const D = () => V()[tab];
+  const find = id => D().find(t => t.id === id);
+  const orderTotal = lines => lines.reduce((a, x) => a + x.p * x.q, 0);
+  const FILT = k => k === "lost" ? [["all", "All"], ["lost", "Lost"], ["found", "Found"], ["Open", "Open"], ["Returned", "Returned"]] : [["all", "All"], ...TABS[k].st.map(s => [s, s])];
+  const is = (t, f, k) => f === "all" || (k === "lost" && (f === "lost" || f === "found") ? t.type === f : t.status === f);
+
+  /* ---------- render ---------- */
+
+  function renderTabs() {
+    $("tabs").innerHTML = Object.entries(TABS).map(([key, t]) => `<button class="tab ${key === tab ? "on" : ""}" role="tab" aria-selected="${key === tab}" data-act="tab" data-tab="${key}"><span class="te">${t.icon}</span><span>${t.label}</span><span class="tc">${V()[key].length}</span></button>`).join("") + `<span class="hint">👆 Tap a tab to switch section</span>`;
+  }
+
+  function render() {
+    const T = TABS[tab];
+    $("menuBtn").hidden = tab !== "canteen";
+    renderTabs();
+    const cta = tab === "lost"
+      ? `<button class="btn big lost" data-act="add" data-type="lost">😢 I lost something</button><button class="btn big found" data-act="add" data-type="found">🙌 I found something</button>`
+      : `<button class="btn big ok" data-act="add">${icon("plus")}${T.add}</button>`;
+    $("page").innerHTML = `<div class="pagehead"><h2 class="sec">${T.icon} ${T.head}</h2><span class="pill" id="sales" hidden></span></div>
+      <p class="intro">${T.intro}</p><div class="cta">${cta}</div>
+      <div class="searchbar"><input class="field" type="search" data-in="q" placeholder="🔎 Search…" value="${esc(ui.q)}" aria-label="Search">${T.cats ? `<select class="field" data-in="cat" aria-label="Category"><option value="">All categories</option>${T.cats.map(c => `<option ${c === ui.cat ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>` : ""}</div>
+      <div class="chips filters" id="chips"></div><div class="grid" id="grid"></div>`;
+    refresh();
+  }
+
+  function refresh() {
+    const all = D(), sp = $("sales");
+    if (sp) { sp.hidden = tab !== "canteen"; sp.textContent = "₹" + all.reduce((a, t) => a + (Number(t.total) || 0), 0) + " in orders"; }
+    $("chips").innerHTML = FILT(tab).map(([v, l]) => `<button class="fc ${ui.f === v ? "on" : ""}" data-act="filter" data-f="${esc(v)}">${l}<b>${all.filter(t => is(t, v, tab)).length}</b></button>`).join("");
+    const q = ui.q.toLowerCase();
+    const list = all.filter(t => is(t, ui.f, tab) && (!ui.cat || t.cat === ui.cat) &&
+      (!q || [t.title, t.cat, t.loc, t.desc, t.who, t.status, (t.lines || []).map(l => l.n).join(" ")].join(" ").toLowerCase().includes(q)));
+    $("grid").innerHTML = list.map(cardHtml).join("") || `<div class="empty">${all.length ? "Nothing matches that search 🔍" : "Nothing here yet. Press the big button above to add the first one ✏️"}</div>`;
+  }
+
+  function cardHtml(t) {
+    const k = tab, T = TABS[k], i = T.st.indexOf(t.status), done = t.status === T.done, cls = done ? "s-done" : i <= 0 ? "s-bad" : "s-mid";
+    const id = esc(t.id);
+    let top, body, btns;
+    if (k === "lost") {
+      const lost = t.type === "lost";
+      top = `<span class="big-i">${EM[t.cat] || "📦"}</span><span class="stamp ${done ? "ret" : lost ? "lost" : "found"}">${done ? "Returned" : lost ? "Lost" : "Found"}</span>`;
+      body = `<div class="tags"><span class="chip">${esc(t.cat)}</span></div><div class="title">${esc(t.title)}</div>
+        ${t.loc ? `<div class="desc">📍 ${lost ? "Lost" : "Found"} at ${esc(t.loc)}</div>` : ""}${t.desc ? `<div class="desc">${esc(t.desc)}</div>` : ""}`;
+      btns = done ? `<button class="btn sm" data-act="reopen" data-id="${id}">Reopen</button>`
+        : `<button class="btn sm ok" data-act="advance" data-id="${id}">${icon("check")}${lost ? "Got it back" : "Handed over"}</button>`;
+    } else {
+      top = `<span class="big-i">${k === "canteen" ? "🍽️" : EM[t.cat] || "📌"}</span><span class="chip ${cls}">${esc(t.status)}</span>`;
+      if (k === "canteen") body = `<div class="tags"><span class="chip">⏰ ${esc(t.slot)}</span></div><div class="title">#${String(t.no || 0).padStart(4, "0")} · ${esc(t.who)}</div><div class="desc">${(t.lines || []).map(x => `${+x.q || 0}× ${esc(x.n)}`).join("\n")}</div>${t.desc ? `<div class="desc">📝 ${esc(t.desc)}</div>` : ""}<div class="amt">₹${+t.total || 0}</div>`;
+      else body = `<div class="tags"><span class="chip">${esc(t.cat)}</span><span class="chip p-${esc(t.pri)}">${esc(t.pri)}</span></div><div class="title">${esc(t.title)}</div>${t.loc ? `<div class="desc">📍 ${esc(t.loc)}</div>` : ""}${t.desc ? `<div class="desc">${esc(t.desc)}</div>` : ""}`;
+      btns = i >= 0 && i < T.st.length - 1 ? `<button class="btn sm ok" data-act="advance" data-id="${id}">Next: ${esc(T.st[i + 1])}${icon("next")}</button>` : `<button class="btn sm" data-act="reopen" data-id="${id}">Reopen</button>`;
+    }
+    return `<article class="card ${done ? "done" : ""}" data-id="${id}"><div class="top">${top}</div>${body}
+      <div class="foot"><span class="due">${t.date ? icon("cal") + esc(pretty(t.date)) : ""}</span><div class="row">${btns}
+      <button class="btn sm" data-act="copy" data-id="${id}" title="Copy as text" aria-label="Copy as text">${icon("copy")}</button>
+      <button class="btn sm" data-act="edit" data-id="${id}" title="Edit" aria-label="Edit">${icon("pencil")}</button>
+      <button class="btn sm danger" data-act="del" data-id="${id}" title="Delete" aria-label="Delete">${icon("bin")}</button></div></div></article>`;
+  }
+
+  /* ---------- copy as text ---------- */
+
+  function summary(t) {
+    const p = Sona.data.profile, me = `Contact: ${p.name} (${p.reg}${p.dept ? ", " + p.dept : ""}${p.year ? ", " + p.year : ""})`;
+    if (tab === "canteen") return `Canteen order #${String(t.no || 0).padStart(4, "0")}\nFor: ${t.who}\nPickup slot: ${t.slot}\n${(t.lines || []).map(x => `${x.q} x ${x.n}`).join("\n")}\nTotal: ₹${t.total}${t.desc ? "\nNote: " + t.desc : ""}`;
+    if (tab === "lost") return `${t.type === "lost" ? "LOST" : "FOUND"}: ${t.title}\nCategory: ${t.cat}\n${t.type === "lost" ? "Lost" : "Found"} at: ${t.loc || "not specified"}\nDate: ${t.date}${t.desc ? "\nDetails: " + t.desc : ""}\n${me}`;
+    return `COMPLAINT: ${t.title}\nCategory: ${t.cat} · Priority: ${t.pri}\nLocation: ${t.loc || "not specified"}\nDate: ${t.date}${t.desc ? "\nDetails: " + t.desc : ""}\nStatus: ${t.status}\n${me}`;
+  }
+
+  /* ---------- add / edit ---------- */
+
+  function fieldHtml([key, label, type, extra], v = "") {
+    const id = "f_" + key;
+    const inp = type === "select" ? `<select id="${id}" class="field">${extra.map(o => `<option ${o === v ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`
+      : type === "area" ? `<textarea id="${id}" rows="3" class="field" placeholder="${esc(extra || "")}">${esc(v)}</textarea>`
+      : `<input id="${id}" type="${type}" class="field" maxlength="100" value="${esc(v)}" placeholder="${esc(extra || "")}">`;
+    return `<label for="${id}">${label}</label>${inp}`;
+  }
+
+  function openTask(id, type) {
+    const T = TABS[tab], t = id ? find(id) : null;
+    $("mTask").value = id || "";
+    $("taskModalTitle").textContent = t ? "Edit card" : tab === "lost" ? (type === "found" ? "🙌 I found something" : "😢 I lost something") : T.add;
+    if (tab === "canteen") {
+      const dishes = V().menu.filter(m => m.on || t?.lines?.some(x => x.n === m.name));
+      $("taskFields").innerHTML = `<label for="f_who">Order for</label><input id="f_who" class="field" maxlength="40" value="${esc(t ? t.who : Sona.data.profile.name)}"><label>Dishes</label>` +
+        (dishes.length ? dishes.map(m => `<div class="lrow"><span class="grow">${esc(m.name)} · ₹${+m.price || 0}</span><input class="field num qty" type="number" min="0" max="20" data-dish="${esc(m.id)}" value="${t?.lines?.find(x => x.n === m.name)?.q || 0}" aria-label="Quantity of ${esc(m.name)}"></div>`).join("") : '<p class="lead">The menu is empty. Add dishes with the “Canteen menu” button.</p>') +
+        `<div class="total" id="oTotal"></div><label for="f_slot">Pickup slot</label><select id="f_slot" class="field">${SLOTS.map(s => `<option ${s === t?.slot ? "selected" : ""}>${s}</option>`).join("")}</select><label for="f_desc">Special instructions</label><textarea id="f_desc" rows="2" class="field" placeholder="e.g. Less spicy, no onion">${esc(t ? t.desc || "" : "")}</textarea>`;
+      calcTotal();
+    } else {
+      const kind = t ? t.type : type;
+      $("taskFields").innerHTML = (tab === "lost" ? `<label for="f_type">This item was</label><select id="f_type" class="field"><option value="lost" ${kind === "lost" ? "selected" : ""}>Lost: I’m looking for it</option><option value="found" ${kind === "found" ? "selected" : ""}>Found: I have it / handed it in</option></select>` : "") +
+        T.fields.map(f => fieldHtml(f, t ? t[f[0]] : f[0] === "date" ? today() : f[0] === "pri" ? "Medium" : "")).join("");
+    }
+    openModal("taskModal");
+  }
+
+  function dishLines() {
+    return [...document.querySelectorAll(".qty")].map(i => {
+      const m = V().menu.find(x => x.id === i.dataset.dish);
+      return m && { n: m.name, p: +m.price || 0, q: Math.max(0, Math.min(20, Math.floor(+i.value) || 0)) };
+    }).filter(x => x && x.q > 0);
+  }
+
+  const calcTotal = () => { const e = $("oTotal"); if (e) e.textContent = "Total: ₹" + orderTotal(dishLines()); };
+
+  function saveTask() {
+    const k = tab, id = $("mTask").value;
+    let d;
+    if (k === "canteen") {
+      const lines = dishLines();
+      if (!lines.length) return toast("Pick at least one dish");
+      const who = $("f_who").value.trim();
+      if (!who) { toast("Please add a name for the order"); $("f_who").focus(); return; }
+      d = { who, slot: $("f_slot").value, desc: $("f_desc").value.trim(), lines, total: orderTotal(lines) };
+    } else {
+      d = {};
+      TABS[k].fields.forEach(([key]) => d[key] = $("f_" + key).value.trim());
+      if (!d.title) { toast("Please add a name"); $("f_title").focus(); return; }
+      if (!d.date) d.date = today();
+      if (k === "lost") d.type = $("f_type").value;
+    }
+    if (id) Object.assign(find(id), d);
+    else {
+      const t = { id: uid(), ...d, date: d.date || today(), status: TABS[k].st[0] };
+      if (k === "canteen") t.no = ++V().seq;
+      D().unshift(t);
+    }
+    save(); closeModal("taskModal"); render();
+    toast(id ? "Saved ✏️" : k === "lost" ? "Added to your board 📌" : "Added 🎉");
+  }
+
+  /* ---------- canteen menu ---------- */
+
+  function renderMenu() {
+    $("menuList").innerHTML = menuDraft.map(m => `<div class="lrow"><input type="checkbox" data-m="on" data-id="${esc(m.id)}" ${m.on ? "checked" : ""} title="Available" aria-label="Available"><input class="field" data-m="name" data-id="${esc(m.id)}" value="${esc(m.name)}" maxlength="40" placeholder="Dish name" aria-label="Dish name"><input class="field num" type="number" min="0" data-m="price" data-id="${esc(m.id)}" value="${+m.price || 0}" aria-label="Price"><button class="btn sm danger" data-act="del-dish" data-id="${esc(m.id)}" aria-label="Remove dish">${icon("x")}</button></div>`).join("") || '<p class="empty">No dishes yet. Add the first one below.</p>';
+  }
+
+  /* ---------- events ---------- */
+
+  document.addEventListener("click", e => {
+    const b = e.target.closest("[data-act]");
+    if (!b) return;
+    const a = b.dataset.act, id = b.dataset.id, T = TABS[tab];
+    if (a === "tab") { tab = b.dataset.tab; ui = { q: "", f: "all", cat: "" }; render(); }
+    else if (a === "filter") { ui.f = b.dataset.f; refresh(); }
+    else if (a === "save-task") saveTask();
+    else if (a === "add") openTask(null, b.dataset.type);
+    else if (a === "edit") openTask(id);
+    else if (a === "copy") { const t = find(id); if (t) Sona.copy(summary(t)); }
+    else if (a === "advance") { const t = find(id); if (t) { t.status = T.st[Math.min(T.st.indexOf(t.status) + 1, T.st.length - 1)]; save(); render(); toast("Moved on 🎯"); } }
+    else if (a === "reopen") { const t = find(id); if (t) { t.status = T.st[T.reopen]; save(); render(); toast("Reopened"); } }
+    else if (a === "del") {
+      const k = tab;
+      confirmBox("Throw this away?", "This card will be crumpled up for good.", () =>
+        Sona.crumple(`.card[data-id="${CSS.escape(id)}"]`, () => { V()[k] = V()[k].filter(t => t.id !== id); save(); render(); }));
+    }
+    else if (a === "menu") { menuDraft = JSON.parse(JSON.stringify(V().menu)); renderMenu(); openModal("menuModal"); }
+    else if (a === "add-dish") { menuDraft.push({ id: uid(), name: "", price: 0, on: true }); renderMenu(); }
+    else if (a === "del-dish") { menuDraft = menuDraft.filter(m => m.id !== id); renderMenu(); }
+    else if (a === "save-menu") {
+      V().menu = menuDraft.filter(x => x.name.trim()).map(x => ({ ...x, name: x.name.trim() }));
+      save(); closeModal("menuModal"); toast("Menu saved 🍽️");
+    }
+  });
+
+  document.addEventListener("input", e => {
+    const t = e.target;
+    if (t.dataset.in) { ui[t.dataset.in] = t.value; refresh(); }
+    else if (t.dataset.m) {
+      const m = menuDraft.find(x => x.id === t.dataset.id);
+      if (m) m[t.dataset.m] = t.type === "checkbox" ? t.checked : t.dataset.m === "price" ? Math.max(0, +t.value || 0) : t.value;
+    } else if (t.classList.contains("qty")) calcTotal();
+  });
+
+  Sona.onSync = render;
+  render();
+})();
+</script>
+</body>
+</html>
