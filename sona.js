@@ -394,6 +394,7 @@ const Sona = (() => {
       else if (a === "restore") $("sonaRestore").click();
       else if (a === "logout") S.logout();
       else if (a === "wipe") S.wipe();
+      
     });
 
     document.addEventListener("mousedown", e => { if (e.target.classList.contains("overlay")) S.closeModal(e.target.id); });
@@ -407,17 +408,6 @@ const Sona = (() => {
     });
 
     $("sonaRestore")?.addEventListener("change", e => { if (e.target.files[0]) S.restore(e.target.files[0]); e.target.value = ""; });
-
-    // Prompt to confirm if backup is saved before closing website
-    window.addEventListener("beforeunload", e => {
-      if (S.page === "login" || !S.data) return;
-      const last = S.data.profile.lastBackup;
-      if (!last) {
-        e.preventDefault();
-        e.returnValue = "You haven't saved a backup file yet! Are you sure you want to leave without downloading your backup?";
-        return e.returnValue;
-      }
-    });
 
     // Keep several open tabs in step and handle logging in or out elsewhere.
     addEventListener("storage", e => {
